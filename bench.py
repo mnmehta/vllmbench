@@ -4,28 +4,13 @@ import mlflow
 import sys
 import os
 
-# Configuration
-CONCURRENCIES = [1,2,4,8,16,32,64,128,256]
-INPUT_LEN = 1000
-OUTPUT_LEN = 1000
-QUERIES_PER_USER = 20
-MODEL = "Qwen/Qwen3-0.6B"
-#MODEL = "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
-#MODEL = "deepseek-ai/DeepSeek-R1-0528"
-#MODEL = "Qwen/Qwen3-30B-A3B"
-FRAMEWORK = "vllm"
+from typing import Any, Dict
 
-target_type = os.environ.get("TARGET_TYPE", "").lower()
-if target_type == "gateway":
-  TARGET = "http://infra-inference-scheduling-inference-gateway-istio"
-elif target_type == "direct":
-  TARGET = "http://10.130.1.253:8000"
-else:
-    print(f"Unknown TARGET_TYPE: {target_type!r}")
-    sys.exit(1)
+import hydra
+from omegaconf import DictConfig, OmegaConf
+import shlex
+import tempfile
 
-# MLflow experiment
-mlflow.set_experiment(f"llm-d-version_oct1_{INPUT_LEN}_osl{OUTPUT_LEN}")
 
 # Regex patterns to extract metrics
 METRIC_PATTERNS = {
@@ -47,66 +32,138 @@ METRIC_PATTERNS = {
     "p99_itl": r"P99 ITL \(ms\):\s+([\d\.]+)",
 }
 
-# Determine this script's filename
-script_file = os.path.abspath(__file__)
 
-seed=12345678
-for concurrency in CONCURRENCIES:
-    num_prompts = QUERIES_PER_USER * concurrency
+def _resolve_target(cfg: DictConfig) -> str:
+    # Allow env overrides for compatibility
+    env_target_type = os.environ.get("TARGET_TYPE")
+    env_target = os.environ.get("TARGET")
 
-    print(f"\n===== {FRAMEWORK} - RUNNING {MODEL} FOR {num_prompts} PROMPTS WITH {concurrency} CONCURRENCY {target_type} TARGET =====\n")
+    target_type = (env_target_type or cfg.target_type or "").lower()
+    target = env_target or (cfg.target or "")
 
-    #name=f"vllmdirect_conc{concurrency}"
-    name=f"{target_type}_conc{concurrency}"
-    with mlflow.start_run(run_name=name) as run:
-        # Log parameters
-        mlflow.log_param("framework", FRAMEWORK)
-        mlflow.log_param("model", MODEL)
-        mlflow.log_param("input_len", INPUT_LEN)
-        mlflow.log_param("output_len", OUTPUT_LEN)
-        mlflow.log_param("concurrency", concurrency)
-        mlflow.log_metric("concurrency", concurrency) #Do this so I can sort by concurrency in the UI, params are always sorted lexically whereas metrics can be numeric
-        mlflow.log_param("num_prompts", num_prompts)
-        mlflow.log_param("queries_per_user", QUERIES_PER_USER)
-        mlflow.log_param("target", target_type)
+    if not target:
+        if target_type == "gateway":
+            target = "http://infra-inference-scheduling-inference-gateway-istio"
+        elif target_type == "direct":
+            target = "http://10.130.1.253:8000"
+        else:
+            print(f"Unknown TARGET_TYPE: {target_type!r}")
+            sys.exit(1)
 
-        # Log this script as an artifact
-        mlflow.log_artifact(script_file, artifact_path="source_code")
+    return target
 
-        # Run the benchmark via subprocess
-        cmd = [
-            #"vllm", "bench", "serve",
-            "python","vllm-benchmark/benchmarks/benchmark_serving.py",
-            "--model", MODEL,
-            "--base-url", TARGET,
-            "--dataset-name", "random",
-            "--random-input-len", str(INPUT_LEN),
-            "--random-output-len", str(OUTPUT_LEN),
-            "--max-concurrency", str(concurrency),
-            "--num-prompts", str(num_prompts),
-            "--seed", str(seed),
-            "--ignore-eos"
-        ]
-        seed = seed + 1
 
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            output = result.stdout
-            print(output)
-        except subprocess.CalledProcessError as e:
-            print("Error running vllm bench:", e)
-            print(e.stdout)
-            print(e.stderr)
-            continue
+@hydra.main(config_path="conf", config_name="config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    # Keep working directory unchanged (also set in conf)
+    # Configure MLflow tracking URI if provided via env
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
 
-        # Parse metrics
-        metrics = {}
-        for key, pattern in METRIC_PATTERNS.items():
-            match = re.search(pattern, output)
-            if match:
-                metrics[key] = float(match.group(1))
+    # Resolve experiment name (supports interpolation from config)
+    experiment_name = cfg.experiment_name
+    if isinstance(experiment_name, str):
+        # Interpolate omegaconf variables if present
+        experiment_name = OmegaConf.to_container(cfg, resolve=True)["experiment_name"]  # type: ignore[index]
+    mlflow.set_experiment(str(experiment_name))
 
-        # Log metrics to MLflow
-        for metric_name, value in metrics.items():
-            mlflow.log_metric(metric_name, value)
+    # Determine target
+    target_type = (os.environ.get("TARGET_TYPE") or cfg.target_type).lower()
+    target = _resolve_target(cfg)
+
+    # Determine this script's filename
+    script_file = os.path.abspath(__file__)
+
+    seed = 12345678
+    for concurrency in cfg.concurrencies:
+        num_prompts = cfg.queries_per_user * concurrency
+
+        print(
+            f"\n===== {cfg.framework} - RUNNING {cfg.model} FOR {num_prompts} PROMPTS WITH {concurrency} CONCURRENCY {target_type} TARGET =====\n"
+        )
+
+        name = f"{target_type}_conc{concurrency}"
+        with mlflow.start_run(run_name=name):
+            # Log parameters
+            mlflow.log_param("framework", cfg.framework)
+            mlflow.log_param("model", cfg.model)
+            mlflow.log_param("input_len", cfg.input_len)
+            mlflow.log_param("output_len", cfg.output_len)
+            mlflow.log_param("concurrency", concurrency)
+            # Do this so I can sort by concurrency in the UI with numeric order
+            mlflow.log_metric("concurrency", concurrency)
+            mlflow.log_param("num_prompts", num_prompts)
+            mlflow.log_param("queries_per_user", cfg.queries_per_user)
+            mlflow.log_param("target_type", target_type)
+            mlflow.log_param("target", target)
+
+            # Log this script as an artifact
+            mlflow.log_artifact(script_file, artifact_path="source_code")
+
+            # Run the benchmark via subprocess
+            cmd = [
+                "python",
+                "vllm-benchmark/benchmarks/benchmark_serving.py",
+                "--model",
+                cfg.model,
+                "--base-url",
+                target,
+                "--dataset-name",
+                "random",
+                "--random-input-len",
+                str(cfg.input_len),
+                "--random-output-len",
+                str(cfg.output_len),
+                "--max-concurrency",
+                str(concurrency),
+                "--num-prompts",
+                str(num_prompts),
+                "--seed",
+                str(seed),
+                "--ignore-eos",
+            ]
+
+            # Record the exact command used
+            command_str = " ".join(shlex.quote(part) for part in cmd)
+            mlflow.log_param("benchmark_cmd", command_str)
+            try:
+                mlflow.log_text(command_str + "\n", artifact_file="benchmark_cmd.txt")
+            except Exception:
+                with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmpf:
+                    tmpf.write(command_str + "\n")
+                    tmp_path = tmpf.name
+                try:
+                    mlflow.log_artifact(tmp_path)
+                finally:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+            seed += 1
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                output = result.stdout
+                print(output)
+            except subprocess.CalledProcessError as e:
+                print("Error running vllm bench:", e)
+                print(e.stdout)
+                print(e.stderr)
+                continue
+
+            # Parse metrics
+            metrics: Dict[str, float] = {}
+            for key, pattern in METRIC_PATTERNS.items():
+                match = re.search(pattern, output)
+                if match:
+                    metrics[key] = float(match.group(1))
+
+            # Log metrics to MLflow
+            for metric_name, value in metrics.items():
+                mlflow.log_metric(metric_name, value)
+
+
+if __name__ == "__main__":
+    main()
 
