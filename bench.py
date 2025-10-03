@@ -101,6 +101,31 @@ def main(cfg: DictConfig) -> None:
             # Log this script as an artifact
             mlflow.log_artifact(script_file, artifact_path="source_code")
 
+            # Log the full conf directory, if available
+            script_dir = os.path.dirname(script_file)
+            conf_candidates = [
+                os.path.join(script_dir, "conf"),
+                os.path.abspath("conf"),
+            ]
+            for conf_dir in conf_candidates:
+                if os.path.isdir(conf_dir):
+                    try:
+                        mlflow.log_artifacts(conf_dir, artifact_path="conf")
+                    except Exception:
+                        pass
+                    break
+
+            # Log the bench.py invocation command
+            entry_cmd = " ".join(
+                [shlex.quote(sys.executable), shlex.quote(script_file)]
+                + [shlex.quote(a) for a in sys.argv[1:]]
+            )
+            mlflow.log_param("entry_cmd", entry_cmd)
+            try:
+                mlflow.log_text(entry_cmd + "\n", artifact_file="entry_cmd.txt")
+            except Exception:
+                pass
+
             # Run the benchmark via subprocess
             cmd = [
                 "python",
