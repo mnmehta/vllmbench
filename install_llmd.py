@@ -1,5 +1,6 @@
 import os
 import ast
+import json
 import subprocess
 import sys
 from typing import List
@@ -16,6 +17,119 @@ def _run(cmd: List[str], cwd: str | None = None) -> None:
 def _ensure_repo(repo_url: str, clone_dir: str) -> None:
     if not os.path.isdir(clone_dir):
         _run(["git", "clone", repo_url, clone_dir])
+
+
+def _get_pods_with_label(namespace: str, label_selector: str) -> List[str]:
+    result = subprocess.run(
+        [
+            "oc",
+            "get",
+            "pods",
+            "-n",
+            namespace,
+            "-l",
+            label_selector,
+            "-o",
+            "jsonpath={.items[*].metadata.name}",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    names = result.stdout.strip().split()
+    return [n for n in names if n]
+
+
+def _wait_for_pods_deleted(namespace: str, label_selector: str, poll_seconds: int = 2) -> None:
+    while True:
+        try:
+            pods = _get_pods_with_label(namespace, label_selector)
+        except subprocess.CalledProcessError:
+            pods = []
+        if not pods:
+            print("All previous labeled pods deleted")
+            return
+        print("Waiting for old pods to delete:", ", ".join(pods))
+        subprocess.run(["sleep", str(poll_seconds)])
+
+
+def _curl_completion_in_pod(namespace: str, pod: str, container: str, url: str, model: str) -> tuple[int, str, str]:
+    payload = {
+        "model": model,
+        "prompt": "Hello, how can I assist you today?",
+        "max_tokens": 20,
+        "temperature": 0.7,
+        "top_p": 0.9,
+    }
+    data = json.dumps(payload)
+    cmd = [
+        "oc",
+        "rsh",
+        "-n",
+        namespace,
+        "-c",
+        container,
+        pod,
+        "curl",
+        "-sS",
+        "-X",
+        "POST",
+        url,
+        "-H",
+        "Content-Type: application/json",
+        "-d",
+        data,
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def wait_until_ready(namespace: str, model: str, container: str = "vllm", label_selector: str = "llm-d.ai/inferenceServing=true") -> None:
+    # Wait for pods to appear
+    pods: List[str] = []
+    while not pods:
+        try:
+            pods = _get_pods_with_label(namespace, label_selector)
+        except subprocess.CalledProcessError:
+            pods = []
+        if not pods:
+            print("No vLLM pods found yet; waiting...")
+            subprocess.run(["sleep", "2"])  # simple delay
+
+    # Check each pod locally via 127.0.0.1:8000
+    for pod in pods:
+        print(f"Checking local inference on pod: {pod}")
+        while True:
+            code, out, err = _curl_completion_in_pod(
+                namespace,
+                pod,
+                container,
+                "http://127.0.0.1:8000/v1/completions",
+                model,
+            )
+            if code == 0 and "logprobs" in out:
+                print(f"Pod {pod} local inference OK")
+                break
+            print(f"Pod {pod} not ready (code={code}); retrying...")
+            subprocess.run(["sleep", "1"])  # backoff
+
+    # After all pods pass, check gateway via any pod (use first)
+    gw_url = "http://infra-inference-scheduling-inference-gateway-istio/v1/completions"
+    first_pod = pods[0]
+    print("Checking gateway readiness via pod:", first_pod)
+    while True:
+        code, out, err = _curl_completion_in_pod(
+            namespace,
+            first_pod,
+            container,
+            gw_url,
+            model,
+        )
+        if code == 0 and "logprobs" in out:
+            print("Gateway is ready")
+            break
+        print(f"Gateway not ready (code={code}); retrying...")
+        subprocess.run(["sleep", "1"])  # backoff
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -39,6 +153,8 @@ def main(cfg: DictConfig) -> None:
     # Destroy any existing release set
     if destroy_first:
         _run(["helmfile", "destroy", "-n", namespace], cwd=work_dir)
+        # Ensure all old vLLM pods are gone before proceeding
+        _wait_for_pods_deleted(namespace, "llm-d.ai/inferenceServing=true")
 
     # Apply infra and gaie
     _run(["helmfile", "-f", helmfile_path, "-l", "name=infra-inference-scheduling", "apply", "-n", namespace], cwd=work_dir)
@@ -88,6 +204,16 @@ def main(cfg: DictConfig) -> None:
         values_parts = " ".join([f"--values {p}" for p in resolved_overrides])
         ms_cmd.extend(["--args", values_parts])
     _run(ms_cmd, cwd=work_dir)
+
+    # Readiness check: ensure all vLLM pods respond locally, then gateway
+    # Use the configured run.model when available; fall back to a sensible default
+    model = None
+    try:
+        # If config contains the run group use that model
+        model = str(cfg.run.model)
+    except Exception:
+        model = "Qwen/Qwen3-0.6B"
+    wait_until_ready(namespace=namespace, model=model)
 
 
 if __name__ == "__main__":
