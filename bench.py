@@ -53,7 +53,7 @@ def _resolve_target(cfg: DictConfig) -> str:
     return target
 
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
+@hydra.main(config_path="conf", config_name="default", version_base=None)
 def main(cfg: DictConfig) -> None:
     # Keep working directory unchanged (also set in conf)
     # Configure MLflow tracking URI if provided via env
@@ -128,6 +128,9 @@ def main(cfg: DictConfig) -> None:
 
             # Run the benchmark via subprocess
             cmd = [
+                "oc",
+                "rsh",
+                cfg.run.benchmark_pod,
                 "python",
                 "vllm-benchmark/benchmarks/benchmark_serving.py",
                 "--model",

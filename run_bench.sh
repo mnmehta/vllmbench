@@ -1,6 +1,6 @@
 #! /bin/bash
-pod=llmdbench-inference-perf-launcher
-oc cp . ${pod}:vllmbench
-oc rsh $pod bash -c "TARGET_TYPE=gateway MLFLOW_TRACKING_URI=http://169.63.180.173:5000 python vllmbench/bench.py $*"
-#oc rsh $pod bash -c "TARGET_TYPE=gateway MLFLOW_TRACKING_URI=http://169.63.180.173:5000 python vllmbench/bench.py --config-name llama70b"
-#oc rsh $pod bash -c "TARGET=http://10.130.0.166:8000 TARGET_TYPE=direct MLFLOW_TRACKING_URI=http://169.63.180.173:5000 python vllmbench/bench.py --config-name llama70b"
+for config in default llama70b
+do
+  python install_llmd.py --config-name $config
+  MLFLOW_TRACKING_URI=http://169.63.180.173:5000 python bench.py --config-name $config run.concurrencies='[3,4]' run.queries_per_user=1 run.experiment_name=test2
+done

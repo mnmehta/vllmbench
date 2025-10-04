@@ -132,7 +132,7 @@ def wait_until_ready(namespace: str, model: str, container: str = "vllm", label_
         subprocess.run(["sleep", "1"])  # backoff
 
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
+@hydra.main(config_path="conf", config_name="default", version_base=None)
 def main(cfg: DictConfig) -> None:
     repo_url = cfg.install.repo_url
     llmd_dir = cfg.install.llmd_dir
