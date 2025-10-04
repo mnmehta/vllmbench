@@ -1,6 +1,10 @@
 defaults:
   - config
   - _self_
-model: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
-experiment_name: "llm-d-version_oct1_70b_${input_len}_osl${output_len}"
 
+run:
+  model: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  experiment_name: "llm-d-version_oct1_70b_${run.input_len}_osl${run.output_len}"
+
+install:
+  helmfile_overrides: "override_ms_70b.yaml"

@@ -62,39 +62,39 @@ def main(cfg: DictConfig) -> None:
         mlflow.set_tracking_uri(tracking_uri)
 
     # Resolve experiment name (supports interpolation from config)
-    experiment_name = cfg.experiment_name
+    experiment_name = cfg.run.experiment_name
     if isinstance(experiment_name, str):
         # Interpolate omegaconf variables if present
-        experiment_name = OmegaConf.to_container(cfg, resolve=True)["experiment_name"]  # type: ignore[index]
+        experiment_name = OmegaConf.to_container(cfg, resolve=True)["run"]["experiment_name"]  # type: ignore[index]
     mlflow.set_experiment(str(experiment_name))
 
     # Determine target
-    target_type = (os.environ.get("TARGET_TYPE") or cfg.target_type).lower()
-    target = _resolve_target(cfg)
+    target_type = (os.environ.get("TARGET_TYPE") or cfg.run.target_type).lower()
+    target = _resolve_target(cfg.run)
 
     # Determine this script's filename
     script_file = os.path.abspath(__file__)
 
     seed = 12345678
-    for concurrency in cfg.concurrencies:
-        num_prompts = cfg.queries_per_user * concurrency
+    for concurrency in cfg.run.concurrencies:
+        num_prompts = cfg.run.queries_per_user * concurrency
 
         print(
-            f"\n===== {cfg.framework} - RUNNING {cfg.model} FOR {num_prompts} PROMPTS WITH {concurrency} CONCURRENCY {target_type} TARGET =====\n"
+            f"\n===== {cfg.run.framework} - RUNNING {cfg.run.model} FOR {num_prompts} PROMPTS WITH {concurrency} CONCURRENCY {target_type} TARGET =====\n"
         )
 
         name = f"{target_type}_conc{concurrency}"
         with mlflow.start_run(run_name=name):
             # Log parameters
-            mlflow.log_param("framework", cfg.framework)
-            mlflow.log_param("model", cfg.model)
-            mlflow.log_param("input_len", cfg.input_len)
-            mlflow.log_param("output_len", cfg.output_len)
+            mlflow.log_param("framework", cfg.run.framework)
+            mlflow.log_param("model", cfg.run.model)
+            mlflow.log_param("input_len", cfg.run.input_len)
+            mlflow.log_param("output_len", cfg.run.output_len)
             mlflow.log_param("concurrency", concurrency)
             # Do this so I can sort by concurrency in the UI with numeric order
             mlflow.log_metric("concurrency", concurrency)
             mlflow.log_param("num_prompts", num_prompts)
-            mlflow.log_param("queries_per_user", cfg.queries_per_user)
+            mlflow.log_param("queries_per_user", cfg.run.queries_per_user)
             mlflow.log_param("target_type", target_type)
             mlflow.log_param("target", target)
 
@@ -131,15 +131,15 @@ def main(cfg: DictConfig) -> None:
                 "python",
                 "vllm-benchmark/benchmarks/benchmark_serving.py",
                 "--model",
-                cfg.model,
+                cfg.run.model,
                 "--base-url",
                 target,
                 "--dataset-name",
                 "random",
                 "--random-input-len",
-                str(cfg.input_len),
+                str(cfg.run.input_len),
                 "--random-output-len",
-                str(cfg.output_len),
+                str(cfg.run.output_len),
                 "--max-concurrency",
                 str(concurrency),
                 "--num-prompts",
