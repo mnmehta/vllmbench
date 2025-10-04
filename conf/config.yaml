@@ -27,7 +27,7 @@ install:
   well_lit_path: "guides/inference-scheduling/"
 
   # Helmfile overrides file (interpreted relative to install_llmd.py location)
-  helmfile_overrides: 
+  helmfile_overrides: override_ms_replicas.yaml
   namespace: "llm-d-inference-scheduler"
 
   # Helmfile behavior

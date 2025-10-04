@@ -7,4 +7,6 @@ run:
   experiment_name: "llm-d-version_oct1_70b_${run.input_len}_osl${run.output_len}"
 
 install:
-  helmfile_overrides: "override_ms_70b.yaml"
+  helmfile_overrides:
+    - override_ms_70b.yaml
+    - override_ms_replicas.yaml

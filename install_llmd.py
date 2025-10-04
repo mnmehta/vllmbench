@@ -1,10 +1,11 @@
 import os
+import ast
 import subprocess
 import sys
 from typing import List
 
 import hydra
-from omegaconf import DictConfig
+from omegaconf import DictConfig, ListConfig
 
 
 def _run(cmd: List[str], cwd: str | None = None) -> None:
@@ -23,7 +24,6 @@ def main(cfg: DictConfig) -> None:
     llmd_dir = cfg.install.llmd_dir
     well_lit_path = cfg.install.well_lit_path
     helmfile_overrides_value = cfg.install.helmfile_overrides
-    helmfile_overrides = str(helmfile_overrides_value) if helmfile_overrides_value is not None else ""
     namespace = cfg.install.namespace
     helmfile_path = cfg.install.helmfile_path
     destroy_first = bool(cfg.install.destroy_first)
@@ -44,15 +44,34 @@ def main(cfg: DictConfig) -> None:
     _run(["helmfile", "-f", helmfile_path, "-l", "name=infra-inference-scheduling", "apply", "-n", namespace], cwd=work_dir)
     _run(["helmfile", "-f", helmfile_path, "-l", "name=gaie-inference-scheduling", "apply", "-n", namespace], cwd=work_dir)
 
-    # Resolve overrides file strictly relative to this script, if provided
-    resolved_override: str | None = None
-    if helmfile_overrides.strip():
-        script_dir = os.path.dirname(__file__)
-        candidate = os.path.join(script_dir, helmfile_overrides)
-        if not os.path.isfile(candidate):
-            print(f"Overrides file not found at: {candidate}")
-            sys.exit(1)
-        resolved_override = candidate
+    # Resolve override files strictly relative to this script, if provided
+    resolved_overrides: List[str] = []
+    if helmfile_overrides_value:
+        # Accept a Hydra ListConfig / list / tuple, or parse string forms
+        if isinstance(helmfile_overrides_value, (list, tuple, ListConfig)):
+            override_items = [str(x) for x in helmfile_overrides_value if str(x).strip()]
+        else:
+            s = str(helmfile_overrides_value).strip()
+            parsed: List[str] = []
+            if s.startswith("[") and s.endswith("]"):
+                try:
+                    val = ast.literal_eval(s)
+                    if isinstance(val, (list, tuple)):
+                        parsed = [str(x) for x in val if str(x).strip()]
+                except Exception:
+                    pass
+            if not parsed and "," in s:
+                parsed = [part.strip() for part in s.split(",") if part.strip()]
+            override_items = parsed if parsed else ([s] if s else [])
+
+        if override_items:
+            script_dir = os.path.dirname(__file__)
+            for item in override_items:
+                candidate = os.path.join(script_dir, item)
+                if not os.path.isfile(candidate):
+                    print(f"Overrides file not found at: {candidate}")
+                    sys.exit(1)
+                resolved_overrides.append(candidate)
 
     # Apply ms; add overrides only when provided
     ms_cmd = [
@@ -65,8 +84,9 @@ def main(cfg: DictConfig) -> None:
         "-n",
         namespace,
     ]
-    if resolved_override is not None:
-        ms_cmd.extend(["--args", f"--values {resolved_override}"])
+    if resolved_overrides:
+        values_parts = " ".join([f"--values {p}" for p in resolved_overrides])
+        ms_cmd.extend(["--args", values_parts])
     _run(ms_cmd, cwd=work_dir)
 
 
