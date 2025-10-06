@@ -97,6 +97,7 @@ def main(cfg: DictConfig) -> None:
             mlflow.log_param("queries_per_user", cfg.run.queries_per_user)
             mlflow.log_param("target_type", target_type)
             mlflow.log_param("target", target)
+            mlflow.log_param("well_lit_path", cfg.install.well_lit_path)
 
             # Log this script as an artifact
             mlflow.log_artifact(script_file, artifact_path="source_code")
