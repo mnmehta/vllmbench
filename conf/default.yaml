@@ -35,3 +35,40 @@ install:
   helmfile_path: "helmfile.yaml.gotmpl"
   destroy_first: true
 
+# Group: multiturn (multi-turn benchmark settings)
+multiturn:
+  pod_name: "vllm"
+  namespace: ${install.namespace}
+  workdir: "/model-cache/vllm_build/vllm/benchmarks/multi_turn"
+  url: "http://infra-inference-scheduling-inference-gateway-istio"
+  generated_input_path: "/tmp/multiturn_input.json"
+  input:
+    filetype: "generate_conversations"
+    num_conversations: 512
+    text_files: ["combined_gutenberg_books.txt"]
+    print_stats: false
+    prompt_input:
+      num_turns:
+        distribution: "uniform"
+        min: 10
+        max: 10
+      common_prefix_num_tokens:
+        distribution: "constant"
+        value: 0
+      prefix_num_tokens:
+        distribution: "lognormal"
+        average: 10000
+        max: 10000
+      num_tokens:
+        distribution: "uniform"
+        min: 128
+        max: 128
+    prompt_output:
+      num_tokens:
+        distribution: "uniform"
+        min: 128
+        max: 128
+  num_clients: 32
+  max_active_conversations: 512
+  request_rate: 0.0
+  experiment_name: "multiturn_${run.model}"
