@@ -129,6 +129,7 @@ def main(cfg: DictConfig) -> None:
         mlflow.log_param("num_clients", cfg.multiturn.num_clients)
         mlflow.log_param("max_active_conversations", cfg.multiturn.max_active_conversations)
         mlflow.log_param("request_rate", cfg.multiturn.request_rate)
+        mlflow.log_param("well_lit_path", cfg.install.well_lit_path)
         # Log this script and conf directory as artifacts
         script_file = os.path.abspath(__file__)
         try:
