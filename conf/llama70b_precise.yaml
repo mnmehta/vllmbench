@@ -8,7 +8,7 @@ run:
 
 install:
   helmfile_overrides:
-    - helm_values70b_precise.yaml
+    - override_ms_precise_vllmargs.yaml
     - override_ms_70b.yaml
     - override_ms_replicas.yaml
   well_lit_path: guides/precise-prefix-cache-aware

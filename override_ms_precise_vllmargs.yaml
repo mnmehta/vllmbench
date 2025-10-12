@@ -1,3 +1,28 @@
+# This is the same as https://github.com/llm-d/llm-d/blob/main/guides/precise-prefix-cache-aware/ms-kv-events/values.yaml but the vllm args are modified for 70B
+multinode: false
+
+modelArtifacts:
+  uri: "hf://Qwen/Qwen3-0.6B"
+  size: 20Gi
+  authSecretName: "llm-d-hf-token"
+  name: "Qwen/Qwen3-0.6B"
+
+routing:
+  servicePort: 8000
+  proxy:
+    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.3.0
+    connector: nixlv2
+    secure: false
+
+  inferencePool:
+    create: false
+
+  httpRoute:
+    create: false
+
+  epp:
+    create: false
+
 decode:
   create: true
   replicas: 2
@@ -9,7 +34,7 @@ decode:
       interval: "30s"
   containers:
   - name: "vllm"
-    image: "ghcr.io/llm-d/llm-d-cuda-dev:pr-230@sha256:744738e06eabc2dbf53b299d01572f149a25c752d31e7dd8bb828776c509076c"
+    image: ghcr.io/llm-d/llm-d-cuda:v0.3.0
     modelCommand: custom
     command:
       - /bin/sh
@@ -72,3 +97,7 @@ decode:
     emptyDir: {}
   - name: torch-compile-cache
     emptyDir: {}
+
+# PD disabled in this example
+prefill:
+  create: false
