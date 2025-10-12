@@ -34,6 +34,8 @@ install:
   # Helmfile behavior
   helmfile_path: "helmfile.yaml.gotmpl"
   destroy_first: true
+  # GAIE overrides (0+ values files)
+  gaie_helmfile_overrides: []
 
 # Group: multiturn (multi-turn benchmark settings)
 multiturn:

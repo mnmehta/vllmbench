@@ -138,6 +138,7 @@ def main(cfg: DictConfig) -> None:
     llmd_dir = cfg.install.llmd_dir
     well_lit_path = cfg.install.well_lit_path
     helmfile_overrides_value = cfg.install.helmfile_overrides
+    gaie_helmfile_overrides_value = getattr(cfg.install, "gaie_helmfile_overrides", None)
     namespace = cfg.install.namespace
     helmfile_path = cfg.install.helmfile_path
     destroy_first = bool(cfg.install.destroy_first)
@@ -156,9 +157,62 @@ def main(cfg: DictConfig) -> None:
         # Ensure all old vLLM pods are gone before proceeding
         _wait_for_pods_deleted(namespace, "llm-d.ai/inferenceServing=true")
 
-    # Apply infra and gaie
+    # Apply infra first
     _run(["helmfile", "-f", helmfile_path, "-l", "name=infra-inference-scheduling", "apply", "-n", namespace], cwd=work_dir)
-    _run(["helmfile", "-f", helmfile_path, "-l", "name=gaie-inference-scheduling", "apply", "-n", namespace], cwd=work_dir)
+
+    # Resolve GAIE override files strictly relative to this script, if provided
+    gaie_resolved_overrides: List[str] = []
+    if gaie_helmfile_overrides_value:
+        if isinstance(gaie_helmfile_overrides_value, (list, tuple, ListConfig)):
+            gaie_items = [str(x) for x in gaie_helmfile_overrides_value if str(x).strip()]
+        else:
+            s = str(gaie_helmfile_overrides_value).strip()
+            parsed: List[str] = []
+            if s.startswith("[") and s.endswith("]"):
+                try:
+                    val = ast.literal_eval(s)
+                    if isinstance(val, (list, tuple)):
+                        parsed = [str(x) for x in val if str(x).strip()]
+                except Exception:
+                    pass
+            if not parsed and "," in s:
+                parsed = [part.strip() for part in s.split(",") if part.strip()]
+            gaie_items = parsed if parsed else ([s] if s else [])
+
+        if gaie_items:
+            script_dir = os.path.dirname(__file__)
+            for item in gaie_items:
+                candidate = os.path.join(script_dir, item)
+                if not os.path.isfile(candidate):
+                    print(f"GAIE overrides file not found at: {candidate}")
+                    sys.exit(1)
+                gaie_resolved_overrides.append(candidate)
+
+    # Optional: synthesize a GAIE plugin values file if config/custom_config provided
+    temp_gaie_values_path = None
+
+    # Apply GAIE with optional overrides
+    gaie_cmd = [
+        "helmfile",
+        "-f",
+        helmfile_path,
+        "-l",
+        "name=gaie-inference-scheduling",
+        "apply",
+        "-n",
+        namespace,
+    ]
+    if gaie_resolved_overrides:
+        gaie_values_parts = " ".join([f"--values {p}" for p in gaie_resolved_overrides])
+        gaie_cmd.extend(["--args", gaie_values_parts])
+    try:
+        _run(gaie_cmd, cwd=work_dir)
+    finally:
+        if temp_gaie_values_path:
+            try:
+                os.unlink(temp_gaie_values_path)
+            except OSError:
+                pass
 
     # Resolve override files strictly relative to this script, if provided
     resolved_overrides: List[str] = []
