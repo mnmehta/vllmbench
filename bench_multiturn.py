@@ -118,7 +118,7 @@ def main(cfg: DictConfig) -> None:
         str(cfg.multiturn.request_rate),
     ]
 
-    with mlflow.start_run(run_name="multiturn"):
+    with mlflow.start_run(cfg.multiturn.run_name):
         # Log params
         mlflow.log_param("framework", cfg.run.framework)
         mlflow.log_param("model", cfg.run.model)
@@ -129,6 +129,22 @@ def main(cfg: DictConfig) -> None:
         mlflow.log_param("num_clients", cfg.multiturn.num_clients)
         mlflow.log_param("max_active_conversations", cfg.multiturn.max_active_conversations)
         mlflow.log_param("request_rate", cfg.multiturn.request_rate)
+        # Log GAIE overrides list for traceability (log even if None)
+        try:
+            gaie_overrides_cfg = getattr(cfg.install, "gaie_helmfile_overrides", None)
+            # Normalize via OmegaConf to get native python types when possible
+            try:
+                gaie_overrides_val = OmegaConf.to_container(gaie_overrides_cfg, resolve=True)  # type: ignore[arg-type]
+            except Exception:
+                gaie_overrides_val = gaie_overrides_cfg
+            if isinstance(gaie_overrides_val, (list, tuple)):
+                value_str = ",".join(str(x) for x in gaie_overrides_val)
+            else:
+                value_str = str(gaie_overrides_val)
+            mlflow.log_param("gaie_helmfile_overrides", value_str)
+        except Exception:
+            # Ensure the param exists in MLflow even on error
+            mlflow.log_param("gaie_helmfile_overrides", "<error>")
         mlflow.log_param("well_lit_path", cfg.install.well_lit_path)
         # Log this script and conf directory as artifacts
         script_file = os.path.abspath(__file__)

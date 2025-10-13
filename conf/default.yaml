@@ -39,7 +39,8 @@ install:
 
 # Group: multiturn (multi-turn benchmark settings)
 multiturn:
-  pod_name: "vllm"
+  run_name: "multiturn"
+  pod_name: "vllm" #This is where vllm bench is run from
   namespace: ${install.namespace}
   workdir: "/model-cache/vllm_build/vllm/benchmarks/multi_turn"
   url: "http://infra-inference-scheduling-inference-gateway-istio"
