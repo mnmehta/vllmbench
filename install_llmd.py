@@ -142,6 +142,7 @@ def main(cfg: DictConfig) -> None:
     namespace = cfg.install.namespace
     helmfile_path = cfg.install.helmfile_path
     destroy_first = bool(cfg.install.destroy_first)
+    decode_replicas = int(getattr(cfg.install, "decode_replicas", 8))
 
     # Clone if missing
     _ensure_repo(repo_url, llmd_dir)
@@ -254,9 +255,12 @@ def main(cfg: DictConfig) -> None:
         "-n",
         namespace,
     ]
+    args_parts = []
     if resolved_overrides:
-        values_parts = " ".join([f"--values {p}" for p in resolved_overrides])
-        ms_cmd.extend(["--args", values_parts])
+        args_parts.append(" ".join([f"--values {p}" for p in resolved_overrides]))
+    # Always set replicas via --set so no values file is required for that scalar
+    args_parts.append(f"--set decode.replicas={decode_replicas}")
+    ms_cmd.extend(["--args", " ".join(args_parts)])
     _run(ms_cmd, cwd=work_dir)
 
     # Readiness check: ensure all vLLM pods respond locally, then gateway

@@ -118,7 +118,7 @@ def main(cfg: DictConfig) -> None:
         str(cfg.multiturn.request_rate),
     ]
 
-    with mlflow.start_run(cfg.multiturn.run_name):
+    with mlflow.start_run(run_name=cfg.multiturn.run_name):
         # Log params
         mlflow.log_param("framework", cfg.run.framework)
         mlflow.log_param("model", cfg.run.model)
@@ -129,6 +129,7 @@ def main(cfg: DictConfig) -> None:
         mlflow.log_param("num_clients", cfg.multiturn.num_clients)
         mlflow.log_param("max_active_conversations", cfg.multiturn.max_active_conversations)
         mlflow.log_param("request_rate", cfg.multiturn.request_rate)
+        mlflow.log_param("replicas", cfg.install.decode_replicas)
         # Log GAIE overrides list for traceability (log even if None)
         try:
             gaie_overrides_cfg = getattr(cfg.install, "gaie_helmfile_overrides", None)

@@ -28,7 +28,7 @@ install:
   well_lit_path: "guides/inference-scheduling/"
 
   # Helmfile overrides file (interpreted relative to install_llmd.py location)
-  helmfile_overrides: override_ms_replicas.yaml
+  helmfile_overrides:
   namespace: "llm-d-inference-scheduler"
 
   # Helmfile behavior
@@ -36,6 +36,8 @@ install:
   destroy_first: true
   # GAIE overrides (0+ values files)
   gaie_helmfile_overrides: []
+  # ModelService (ms) scalars
+  decode_replicas: 8
 
 # Group: multiturn (multi-turn benchmark settings)
 multiturn:

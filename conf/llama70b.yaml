@@ -9,4 +9,3 @@ run:
 install:
   helmfile_overrides:
     - override_ms_70b.yaml
-    - override_ms_replicas.yaml
