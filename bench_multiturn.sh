@@ -1,6 +1,5 @@
 #!/bin/bash
 # Hardcode this for now since install_llmd.py hardcodes it in the name=infra-... label
-export MLFLOW_TRACKING_URI=http://169.63.180.173:5000
 export RELEASE_NAME_POSTFIX=inference-scheduling 
 turns=10
 experiment_name="multiturn_sweep2"
