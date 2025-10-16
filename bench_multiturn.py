@@ -116,6 +116,8 @@ def main(cfg: DictConfig) -> None:
         str(cfg.multiturn.max_active_conversations),
         "--request-rate",
         str(cfg.multiturn.request_rate),
+        "--seed",
+        str(cfg.multiturn.get("seed", 999999)),
     ]
 
     with mlflow.start_run(run_name=cfg.multiturn.run_name):
@@ -129,6 +131,10 @@ def main(cfg: DictConfig) -> None:
         mlflow.log_param("num_clients", cfg.multiturn.num_clients)
         mlflow.log_param("max_active_conversations", cfg.multiturn.max_active_conversations)
         mlflow.log_param("request_rate", cfg.multiturn.request_rate)
+        try:
+            mlflow.log_param("seed", int(cfg.multiturn.get("seed", 999999)))
+        except Exception:
+            mlflow.log_param("seed", str(cfg.multiturn.get("seed", 999999)))
         mlflow.log_param("replicas", cfg.install.decode_replicas)
         # Log GAIE overrides list for traceability (log even if None)
         try:

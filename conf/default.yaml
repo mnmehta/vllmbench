@@ -47,6 +47,7 @@ multiturn:
   workdir: "/model-cache/vllm_build/vllm/benchmarks/multi_turn"
   url: "http://infra-inference-scheduling-inference-gateway-istio"
   generated_input_path: "/tmp/multiturn_input.json"
+  seed: 999999
   input:
     filetype: "generate_conversations"
     num_conversations: 512
