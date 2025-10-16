@@ -1,0 +1,5 @@
+inferenceExtension:
+    flags:
+    # Log verbosity
+    - name: v
+      value: 5
