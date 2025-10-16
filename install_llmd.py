@@ -1,3 +1,5 @@
+# Co-authored by Cursor
+
 import os
 import ast
 import json
