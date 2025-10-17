@@ -1,4 +1,4 @@
-## vllmbench: Running benchmarks and installers
+## Running vllm bench workloads against an llm-d endpoint
 
 This directory contains scripts to install the test environment and run single-turn and multi-turn benchmarks against vLLM-based deployments, with MLflow logging.
 
@@ -67,14 +67,6 @@ Notes:
 - Set `experiment_name` and `run_name` at the top of the script.
 - The script initializes `seed=999999` and increments it after each call so every run uses a unique seed.
 
-### bench_multiturn_test.sh (focused test loop)
-Smaller variant for targeted iterations on a single configuration, also passing and incrementing `multiturn.seed`.
-
-Usage:
-```bash
-bash bench_multiturn_test.sh
-```
-
 ### run_bench.sh (example single-turn pipeline)
 Convenience script that alternates installs and single-turn runs with different configs.
 
@@ -96,5 +88,7 @@ Set `MLFLOW_TRACKING_URI` in the environment to log metrics and artifacts:
 ```bash
 export MLFLOW_TRACKING_URI=http://<mlflow-host>:5000
 ```
+###
 
+Portions of this code were generated with help from Cursor
 
