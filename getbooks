@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# Ensure wget is installed
+if ! command -v wget &> /dev/null; then
+    echo "Error: wget is not installed. Please install it (e.g., 'sudo apt install wget' or 'brew install wget')."
+    exit 1
+fi
+
+# Create a temporary directory for downloads
+TEMP_DIR="gutenberg_downloads"
+mkdir -p "$TEMP_DIR" || { echo "Error: Failed to create directory $TEMP_DIR"; exit 1; }
+cd "$TEMP_DIR" || { echo "Error: Failed to change to directory $TEMP_DIR"; exit 1; }
+
+# List of Project Gutenberg book URLs (top 10 largest plain text files, UTF-8)
+BOOK_URLS=(
+    "https://www.gutenberg.org/ebooks/100.txt.utf-8"  # Shakespeare Complete Works
+    "https://www.gutenberg.org/ebooks/2600.txt.utf-8" # War and Peace
+    "https://www.gutenberg.org/ebooks/135.txt.utf-8"  # Les Misérables
+    "https://www.gutenberg.org/ebooks/1399.txt.utf-8" # Anna Karenina
+    "https://www.gutenberg.org/ebooks/1365.txt.utf-8" # Longfellow Poetical Works
+    "https://www.gutenberg.org/ebooks/2701.txt.utf-8" # Moby Dick
+    "https://www.gutenberg.org/ebooks/25717.txt.utf-8" # Decline and Fall, Vol. 1
+    "https://www.gutenberg.org/ebooks/996.txt.utf-8"  # Don Quixote
+    "https://www.gutenberg.org/ebooks/2199.txt.utf-8" # The Iliad
+    "https://www.gutenberg.org/ebooks/1727.txt.utf-8" # The Odyssey
+)
+
+# Output file for concatenated texts
+OUTPUT_FILE="../combined_gutenberg_books.txt"
+
+# Initialize output file
+> "$OUTPUT_FILE" || { echo "Error: Failed to create output file $OUTPUT_FILE"; exit 1; }
+
+# Function to clean Project Gutenberg boilerplate
+clean_boilerplate() {
+    local input_file="$1"
+    local output_file="$2"
+    # Remove PG header (from start to "*** START OF THIS PROJECT GUTENBERG EBOOK")
+    # and footer (from "*** END OF THIS PROJECT GUTENBERG EBOOK" to end)
+    sed -n '/\*\*\* START OF THIS PROJECT GUTENBERG EBOOK/,/\*\*\* END OF THIS PROJECT GUTENBERG EBOOK/p' "$input_file" | \
+    sed '1d;$d' > "$output_file"
+}
+
+# Download and process each book
+for url in "${BOOK_URLS[@]}"; do
+    # Extract filename from URL
+    filename=$(basename "$url")
+    echo "Downloading $url..."
+    if wget --quiet --tries=3 --timeout=10 "$url" -O "$filename"; then
+	cp $filename clean_$filename
+        #echo "Cleaning $filename..."
+        #clean_boilerplate "$filename" "clean_$filename"
+        if [ -s "clean_$filename" ]; then
+            echo "Appending $filename to $OUTPUT_FILE..."
+            cat "clean_$filename" >> "$OUTPUT_FILE"
+            # Add a separator between books
+            echo -e "\n\n--- End of Book ---\n\n" >> "$OUTPUT_FILE"
+        else
+            echo "Warning: Cleaned file for $filename is empty, skipping."
+        fi
+    else
+        echo "Error: Failed to download $url"
+    fi
+done
+
+# Clean up temporary directory
+cd ..
+rm -rf "$TEMP_DIR"
+
+# Check if output file is non-empty
+if [ -s "$OUTPUT_FILE" ]; then
+    echo "Success: Concatenated text saved to $OUTPUT_FILE"
+    wc -c "$OUTPUT_FILE" # Display file size
+else
+    echo "Error: Output file $OUTPUT_FILE is empty or was not created."
+    exit 1
+fi
