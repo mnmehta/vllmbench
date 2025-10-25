@@ -1,0 +1,5 @@
+inferenceExtension:
+  image:
+    name: llm-d-inference-scheduler
+    hub: ghcr.io/guygir
+    tag: latest

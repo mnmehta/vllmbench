@@ -2,17 +2,17 @@
 # Hardcode this for now since install_llmd.py hardcodes it in the name=infra-... label
 export RELEASE_NAME_POSTFIX=inference-scheduling 
 turns=10
-experiment_name="multiturn_sweep2"
+experiment_name="multiturn_sweep_newimage"
 run_name="multiturn_run1"
 seed=999999
 
 declare -a install_opts=(
-  "--config-name llama70b install.gaie_helmfile_overrides='[\"gaie_plugins.yaml\"]'"
-  "--config-name llama70b_precise"
-  "--config-name llama70b"
-  "--config-name default install.well_lit_path=guides/inference-scheduling install.gaie_helmfile_overrides='[\"gaie_plugins.yaml\"]'"
-  "--config-name default install.well_lit_path=guides/precise-prefix-cache-aware"
-  "--config-name default install.well_lit_path=guides/inference-scheduling"
+  "--config-name llama70b install.gaie_helmfile_overrides='[\"gaie_plugins.yaml\",\"gaie_image_override.yaml\"]'"
+  "--config-name llama70b_precise install.gaie_helmfile_overrides='[\"gaie_image_override.yaml\"]'"
+  "--config-name llama70b install.gaie_helmfile_overrides='[\"gaie_image_override.yaml\"]'"
+  "--config-name default install.well_lit_path=guides/inference-scheduling install.gaie_helmfile_overrides='[\"gaie_plugins.yaml\",\"gaie_image_override.yaml\"]'"
+  "--config-name default install.well_lit_path=guides/precise-prefix-cache-aware install.gaie_helmfile_overrides='[\"gaie_image_override.yaml\"]'"
+  "--config-name default install.well_lit_path=guides/inference-scheduling install.gaie_helmfile_overrides='[\"gaie_image_override.yaml\"]'"
 )
 
 # Labels aligned by index with install_opts

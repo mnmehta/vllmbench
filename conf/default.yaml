@@ -78,3 +78,22 @@ multiturn:
   max_active_conversations: 512
   request_rate: 0.0
   experiment_name: "multiturn_${run.model}"
+
+# Group: guidellm_multiturn (GuideLLM multi-turn benchmark settings)
+guidellm_multiturn:
+  run_name: "guidellm_multiturn"
+  pod_name: "vllm"
+  namespace: ${install.namespace}
+  workdir: "/model-cache/vllm_build/vllm/benchmarks/multi_turn"  # not used directly but kept for consistency
+  target: "http://infra-inference-scheduling-inference-gateway-istio"
+  # Default profile/options as requested; can be overridden via Hydra
+  profile: "concurrent"
+  rate: 1
+  data:
+    prompt_tokens: 128
+    output_tokens: 128
+    prefix_tokens: 10000
+    prefix_count: 16
+    turns: 5
+  max_requests: 5
+  experiment_name: "guidellm_${run.model}"
