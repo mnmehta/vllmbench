@@ -4,7 +4,7 @@
 
 export RELEASE_NAME_POSTFIX=inference-scheduling 
 experiment_name="guidellm_sweep"
-run_name="guidellm_run2"
+run_name="guidellm_run4"
 
 # Derive default turns from config (fallback to 5 if not found)
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
