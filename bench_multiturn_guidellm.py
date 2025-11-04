@@ -49,6 +49,110 @@ def _oc_cp_from_pod(namespace: str, pod: str, remote_path: str, local_path: str)
         )
 
 
+def _escape_label_value(value: str) -> str:
+    # Prometheus exposition label escaping: backslash and double-quote
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _pushgateway_post(url: str, body: str) -> None:
+    # Use curl to support -k for self-signed TLS (route edge)
+    cmd = [
+        "curl",
+        "-s",
+        "-S",
+        "-k",
+        "--data-binary",
+        "@-",
+        url,
+    ]
+    subprocess.run(cmd, input=body, text=True, check=True)
+
+
+def _pushgateway_delete(url: str) -> None:
+    cmd = [
+        "curl",
+        "-s",
+        "-S",
+        "-k",
+        "-X",
+        "DELETE",
+        url,
+    ]
+    subprocess.run(cmd, check=True)
+
+
+def _push_runconfig_metric(cfg: DictConfig) -> tuple[str, str, str] | None:
+    """Push a runconfig gauge=1 with key parameters as labels to Pushgateway.
+
+    Returns (pgw_base, job, instance) if pushed, for later deletion.
+    """
+    DEFAULT_PGW = "https://prometheus-pushgateway-llm-d-inference-scheduler.apps.psap-llmd-h200.ibm-rh-ai.rhperfscale.org"
+    pgw_base = os.environ.get("PUSHGATEWAY_URL", DEFAULT_PGW).strip()
+
+    job = os.environ.get("PUSHGATEWAY_JOB", "bench_multiturn").strip()
+    instance = os.environ.get("PUSHGATEWAY_INSTANCE", os.uname().nodename).strip()
+
+    # Collect labels from cfg
+    labels: Dict[str, str] = {}
+    try:
+        labels["run_name"] = str(cfg.guidellm_multiturn.run_name)
+        labels["framework"] = str(cfg.run.framework)
+        labels["model"] = str(cfg.run.model)
+        labels["namespace"] = str(cfg.guidellm_multiturn.namespace)
+        labels["pod"] = str(cfg.guidellm_multiturn.pod_name)
+        labels["profile"] = str(cfg.guidellm_multiturn.profile)
+        labels["rate"] = str(cfg.guidellm_multiturn.rate)
+        labels["max_requests"] = str(cfg.guidellm_multiturn.max_requests)
+        labels["target"] = str(cfg.guidellm_multiturn.target)
+        labels["workdir"] = str(cfg.guidellm_multiturn.workdir)
+        labels["replicas"] = str(cfg.install.decode_replicas)
+        # MLflow run URL (if tracking URI is HTTP)
+        try:
+            active = mlflow.active_run()
+            if active is not None:
+                tracking_uri = mlflow.get_tracking_uri() or ""
+                if tracking_uri.startswith("http"):
+                    base = tracking_uri.rstrip("/")
+                    exp_id = active.info.experiment_id
+                    run_id = active.info.run_id
+                    labels["mlflow_url"] = f"{base}/#/experiments/{exp_id}/runs/{run_id}"
+        except Exception:
+            pass
+        # Data mapping as a compact string
+        data_map = OmegaConf.to_container(cfg.guidellm_multiturn.data, resolve=True)
+        if isinstance(data_map, dict):
+            labels["data"] = ",".join(f"{k}={v}" for k, v in data_map.items())
+        else:
+            labels["data"] = str(cfg.guidellm_multiturn.data)
+    except Exception:
+        pass
+
+    # Build exposition line
+    # runconfig{labelK="v",...} 1
+    label_parts = [
+        f"{k}=\"{_escape_label_value(v)}\"" for k, v in sorted(labels.items())
+    ]
+    line = f"runconfig{{{','.join(label_parts)}}} 1\n"
+
+    url = f"{pgw_base.rstrip('/')}/metrics/job/{job}/instance/{instance}"
+    try:
+        _pushgateway_post(url, line)
+        print(f"[pushgateway] pushed runconfig to {url}")
+    except subprocess.CalledProcessError as e:
+        print(f"[pushgateway] push failed: {e}")
+        return None
+    return (pgw_base, job, instance)
+
+
+def _push_runconfig_delete(pgw_base: str, job: str, instance: str) -> None:
+    url = f"{pgw_base.rstrip('/')}/metrics/job/{job}/instance/{instance}"
+    try:
+        _pushgateway_delete(url)
+        print(f"[pushgateway] deleted runconfig at {url}")
+    except subprocess.CalledProcessError as e:
+        print(f"[pushgateway] delete failed: {e}")
+
+
 def _extract_metrics_from_benchmarks_json(data: dict) -> Dict[str, float]:
     metrics: Dict[str, float] = {}
     try:
@@ -184,6 +288,8 @@ def main(cfg: DictConfig) -> None:
     ]
 
     with mlflow.start_run(run_name=cfg.guidellm_multiturn.run_name):
+        # Push runconfig metric at start (best-effort)
+        pgw_info = _push_runconfig_metric(cfg)
         # Log params
         mlflow.log_param("framework", cfg.run.framework)
         mlflow.log_param("model", cfg.run.model)
@@ -273,6 +379,10 @@ def main(cfg: DictConfig) -> None:
             mlflow.log_text(output, artifact_file="guidellm_output.txt")
         except Exception:
             pass
+        finally:
+            # Ensure deletion of runconfig metric at end
+            if pgw_info is not None:
+                _push_runconfig_delete(*pgw_info)
 
 
 if __name__ == "__main__":
