@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Config
+#export KUBECONFIG="/home/michey/llmd_aug2025/kubeconfig.llmd.8xh200"
+NAMESPACE="${NAMESPACE:-llm-d-inference-scheduler}"
+WORKDIR="/tmp/llm-d-pd-$$"
+
+SCALE_FLAG="${1:-}"
+case "${SCALE_FLAG}" in
+  -h|--help)
+    echo "Usage: $(basename "$0") [--decode2-prefill0]"
+    echo "  --decode2-prefill0  Modify values.yaml to deploy 2 TP4 decode workers and 0 prefill workers"
+    exit 0
+  ;;
+  ""|--decode2-prefill0)
+    ;;
+  *)
+    echo "Unknown option: ${SCALE_FLAG}" >&2
+    exit 1
+  ;;
+esac
+
+echo "Using KUBECONFIG=${KUBECONFIG}"
+echo "Target namespace=${NAMESPACE}"
+
+# Preflight tool checks
+for bin in kubectl helmfile curl jq yq; do
+  command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: Required tool '$bin' not found in PATH"; exit 1; }
+done
+
+# Ensure namespace exists
+if ! kubectl get ns "${NAMESPACE}" >/dev/null 2>&1; then
+  echo "Creating namespace ${NAMESPACE}..."
+  kubectl create namespace "${NAMESPACE}"
+fi
+
+# Ensure HuggingFace token secret exists
+if ! kubectl -n "${NAMESPACE}" get secret llm-d-hf-token >/dev/null 2>&1; then
+  if [ -z "${HF_TOKEN:-}" ]; then
+    echo "ERROR: Secret llm-d-hf-token not found and HF_TOKEN env var not set."
+    echo "Set HF_TOKEN and re-run, e.g.: export HF_TOKEN=hf_xxx"
+    exit 1
+  fi
+  echo "Creating secret llm-d-hf-token from HF_TOKEN..."
+  kubectl -n "${NAMESPACE}" create secret generic llm-d-hf-token --from-literal=HF_TOKEN="${HF_TOKEN}"
+fi
+
+# Fetch latest release tag and clone
+echo "Cloning llm-d latest release..."
+tag="$(curl -s https://api.github.com/repos/llm-d/llm-d/releases/latest | jq -r '.tag_name')"
+rm -rf "${WORKDIR}"
+git clone --depth 1 --branch "${tag}" https://github.com/llm-d/llm-d.git "${WORKDIR}"
+
+pushd "${WORKDIR}/guides/pd-disaggregation" >/dev/null
+  # Targeted modifications only to ms-pd/values.yaml
+  MS_VALUES="${WORKDIR}/guides/pd-disaggregation/ms-pd/values.yaml"
+  if [ -f "${MS_VALUES}" ]; then
+    echo "Modifying ${MS_VALUES} only..."
+    # Model to Qwen/Qwen3-0.6B
+    yq -i '
+      .modelArtifacts.uri = "hf://Qwen/Qwen3-0.6B" |
+      .modelArtifacts.name = "Qwen/Qwen3-0.6B"
+    ' "${MS_VALUES}"
+    # Force RDMA off
+    yq -i '
+      (.decode.containers[].resources.limits."rdma/ib" |= 0) |
+      (.decode.containers[].resources.requests."rdma/ib" |= 0) |
+      (.prefill.containers[].resources.limits."rdma/ib" |= 0) |
+      (.prefill.containers[].resources.requests."rdma/ib" |= 0)
+    ' "${MS_VALUES}"
+    # Optional scaling: 2 TP4 decode, 0 prefill
+    if [ "${SCALE_FLAG}" = "--decode2-prefill0" ]; then
+      yq -i '
+        .decode.replicas = 2 |
+        .decode.parallelism.tensor = 4 |
+        .prefill.replicas = 0
+      ' "${MS_VALUES}"
+    fi
+  else
+    echo "WARNING: ${MS_VALUES} not found; skipping values modification."
+  fi
+
+  echo "Applying helmfile for P/D disaggregation..."
+  helmfile apply -n "${NAMESPACE}"
+
+  # Install HTTPRoute for default provider (istio/kgateway share the same file)
+  if [ -f "httproute.yaml" ]; then
+    echo "Applying HTTPRoute..."
+    kubectl apply -f httproute.yaml -n "${NAMESPACE}"
+  fi
+popd >/dev/null
+
+echo "Helm releases in ${NAMESPACE}:"
+helm list -n "${NAMESPACE}" || true
+
+echo "Kubernetes resources in ${NAMESPACE}:"
+kubectl get all -n "${NAMESPACE}" || true
+
+echo "Done."
+
+
