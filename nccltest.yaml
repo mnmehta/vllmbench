@@ -72,27 +72,92 @@ spec:
 
           mkdir -p /workspace
           cat << 'PYTHONEOF' > /workspace/nvlink_test.py
+          import os
+          import time
           import torch
           import torch.distributed as dist
-          import os
           
-          dist.init_process_group(backend='nccl')
-          rank = dist.get_rank()
-          world_size = dist.get_world_size()
-          local_gpu = rank % torch.cuda.device_count()
-          print(f"[Rank {rank}/{world_size}] Using GPU {local_gpu}: {torch.cuda.get_device_name(local_gpu)}")
+          def bytes_to_mib(b): 
+              return b / (1024 * 1024)
           
-          if rank == 0:
-              for i in range(torch.cuda.device_count()):
-                  for j in range(i + 1, torch.cuda.device_count()):
-                      a = torch.randn(1024 * 1024, device=i)
-                      b = torch.empty_like(a, device=j)
-                      torch.cuda.synchronize()
-                      torch.cuda.current_stream(i).record_event(torch.cuda.Event(enable_timing=True))
-                      b.copy_(a)
-                      torch.cuda.synchronize()
-                      print(f"Bandwidth GPU {i} -> GPU {j}: {a.numel()*4/(1024**2)} MB")
-          dist.destroy_process_group()
+          def main():
+              dist.init_process_group(backend='nccl')
+              rank = dist.get_rank()
+              world_size = dist.get_world_size()
+          
+              # Map rank to a local GPU
+              local_rank = int(os.environ.get("LOCAL_RANK", rank % torch.cuda.device_count()))
+              torch.cuda.set_device(local_rank)
+          
+              # Payload: 256 MiB float32 tensor
+              elem_size = 4
+              size_mib = 256
+              numel = (size_mib * 1024 * 1024) // elem_size
+              warmup, iters = 3, 8
+          
+              send_buf = torch.randn(numel, device='cuda')
+              recv_buf = torch.empty_like(send_buf)
+          
+              # Rank 0 collects a world_size x world_size MiB/s matrix
+              bw = [[0.0 for _ in range(world_size)] for _ in range(world_size)] if rank == 0 else None
+          
+              for src in range(world_size):
+                  for dst in range(world_size):
+                      # Skip diagonal; no send/recv to self
+                      if src == dst:
+                          dist.barrier()
+                          vals = [None for _ in range(world_size)]
+                          dist.all_gather_object(vals, (src, dst, 0.0))
+                          if rank == 0:
+                              bw[src][dst] = 0.0
+                          continue
+          
+                      # Synchronize all ranks for the (src, dst) measurement
+                      dist.barrier()
+          
+                      if rank == src:
+                          # Warmup
+                          for _ in range(warmup):
+                              dist.send(send_buf, dst=dst)
+                          torch.cuda.synchronize()
+          
+                          t0 = time.perf_counter()
+                          for _ in range(iters):
+                              dist.send(send_buf, dst=dst)
+                          torch.cuda.synchronize()
+                          t1 = time.perf_counter()
+          
+                          total_bytes = send_buf.element_size() * send_buf.numel() * iters
+                          secs = max(t1 - t0, 1e-9)
+                          mibps = bytes_to_mib(total_bytes) / secs
+                      elif rank == dst:
+                          for _ in range(warmup):
+                              dist.recv(recv_buf, src=src)
+                          for _ in range(iters):
+                              dist.recv(recv_buf, src=src)
+                          mibps = 0.0
+                      else:
+                          mibps = 0.0
+          
+                      # Gather the sender's measured bandwidth to rank 0
+                      vals = [None for _ in range(world_size)]
+                      dist.all_gather_object(vals, (src, dst, mibps))
+                      if rank == 0:
+                          for s, d, v in vals:
+                              if s == src and d == dst and v > 0:
+                                  bw[s][d] = v
+                                  break
+          
+              if rank == 0:
+                  print("MiB/s bandwidth matrix (src rows -> dst cols):")
+                  for s in range(world_size):
+                      row = " ".join(f"{bw[s][d]:8.0f}" for d in range(world_size))
+                      print(row)
+          
+              dist.destroy_process_group()
+          
+          if __name__ == "__main__":
+              main()
           PYTHONEOF
 
           torchrun --nnodes=$NNODES --nproc_per_node=$NPROC_PER_NODE \
