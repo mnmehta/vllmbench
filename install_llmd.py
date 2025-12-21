@@ -145,6 +145,7 @@ def main(cfg: DictConfig) -> None:
     helmfile_path = cfg.install.helmfile_path
     destroy_first = bool(cfg.install.destroy_first)
     decode_replicas = int(getattr(cfg.install, "decode_replicas", 8))
+    decode_tp = int(getattr(cfg.install, "decode_tp", 1))
 
     # Clone if missing
     _ensure_repo(repo_url, llmd_dir)
@@ -262,6 +263,22 @@ def main(cfg: DictConfig) -> None:
         args_parts.append(" ".join([f"--values {p}" for p in resolved_overrides]))
     # Always set replicas via --set so no values file is required for that scalar
     args_parts.append(f"--set decode.replicas={decode_replicas}")
+    # Set tensor parallelism for decode via --set
+    # args_parts.append(f"--set decode.parallelism.tensor={decode_tp}")
+    # Also append explicit vLLM arg via container args so it shows up in the command line without chart edits.
+    # Use Kubernetes env expansion syntax $(TP_SIZE) so the value comes from the container env.
+    if decode_tp and decode_tp >= 1:
+        # Base values.yaml already defines two args; append after them to avoid overwrite.
+        args_parts.append("--set-string decode.containers[0].args[2]=--tensor-parallel-size")
+        args_parts.append("--set-string decode.containers[0].args[3]=$(TP_SIZE)")
+        # Force multiprocessing executor to avoid Ray at TP>1
+        args_parts.append("--set-string decode.containers[0].args[4]=--distributed-executor-backend")
+        args_parts.append("--set-string decode.containers[0].args[5]=mp")
+        # Ensure at least two GPUs are visible when TP>1; override CUDA_VISIBLE_DEVICES from base values.
+        # Note: base values set env[0] to CUDA_VISIBLE_DEVICES; override just its value.
+        # Build device list "0..N-1" and escape commas so Helm does not split the value
+        _cuda_list = "\\,".join(str(i) for i in range(max(decode_tp, 1)))
+        args_parts.append(f"--set-string decode.containers[0].env[0].value={_cuda_list}")
     ms_cmd.extend(["--args", " ".join(args_parts)])
     _run(ms_cmd, cwd=work_dir)
 
