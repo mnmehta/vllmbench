@@ -10,6 +10,8 @@ from typing import List
 import hydra
 from omegaconf import DictConfig, ListConfig
 
+DEFAULT_RELEASE_NAME_POSTFIX = "inference-scheduling"
+
 
 def _run(cmd: List[str], cwd: str | None = None) -> None:
     print("$", " ".join(cmd))
@@ -116,7 +118,7 @@ def wait_until_ready(namespace: str, model: str, container: str = "vllm", label_
             subprocess.run(["sleep", "1"])  # backoff
 
     # After all pods pass, check gateway via any pod (use first)
-    gw_url = "http://infra-inference-scheduling-inference-gateway-istio/v1/completions"
+    gw_url = f"http://infra-{os.environ.get('RELEASE_NAME_POSTFIX', DEFAULT_RELEASE_NAME_POSTFIX)}-inference-gateway-istio/v1/completions"
     first_pod = pods[0]
     print("Checking gateway readiness via pod:", first_pod)
     while True:
@@ -136,6 +138,14 @@ def wait_until_ready(namespace: str, model: str, container: str = "vllm", label_
 
 @hydra.main(config_path="conf", config_name="default", version_base=None)
 def main(cfg: DictConfig) -> None:
+    release_name_postfix = os.environ.get("RELEASE_NAME_POSTFIX", DEFAULT_RELEASE_NAME_POSTFIX)
+    os.environ["RELEASE_NAME_POSTFIX"] = release_name_postfix
+    print(f"Using RELEASE_NAME_POSTFIX={release_name_postfix}")
+
+    infra_release = f"infra-{release_name_postfix}"
+    gaie_release = f"gaie-{release_name_postfix}"
+    ms_release = f"ms-{release_name_postfix}"
+
     repo_url = cfg.install.repo_url
     llmd_dir = cfg.install.llmd_dir
     well_lit_path = cfg.install.well_lit_path
@@ -155,14 +165,55 @@ def main(cfg: DictConfig) -> None:
         print(f"Work directory not found: {work_dir}")
         sys.exit(1)
 
+    # Ensure HuggingFace token secret exists (fixed name expected by charts)
+    hf_secret = "llm-d-hf-token"
+    hf_check = subprocess.run(
+        ["kubectl", "-n", namespace, "get", "secret", hf_secret],
+        capture_output=True,
+        text=True,
+    )
+    if hf_check.returncode != 0:
+        hf_token = os.environ.get("HF_TOKEN", "").strip()
+        if not hf_token:
+            print(f"ERROR: Secret {hf_secret} not found and HF_TOKEN env var not set.")
+            print("Set HF_TOKEN and re-run, e.g.: export HF_TOKEN=hf_xxx")
+            sys.exit(1)
+        print(f"Creating secret {hf_secret} from HF_TOKEN...")
+        _run(
+            [
+                "kubectl",
+                "-n",
+                namespace,
+                "create",
+                "secret",
+                "generic",
+                hf_secret,
+                f"--from-literal=HF_TOKEN={hf_token}",
+            ]
+        )
+
     # Destroy any existing release set
     if destroy_first:
         _run(["helmfile", "destroy", "-n", namespace], cwd=work_dir)
         # Ensure all old vLLM pods are gone before proceeding
-        _wait_for_pods_deleted(namespace, "llm-d.ai/inferenceServing=true")
+        _wait_for_pods_deleted(
+            namespace, f"app.kubernetes.io/instance={ms_release}"
+        )
 
     # Apply infra first
-    _run(["helmfile", "-f", helmfile_path, "-l", "name=infra-inference-scheduling", "apply", "-n", namespace], cwd=work_dir)
+    _run(
+        [
+            "helmfile",
+            "-f",
+            helmfile_path,
+            "-l",
+            f"name={infra_release}",
+            "apply",
+            "-n",
+            namespace,
+        ],
+        cwd=work_dir,
+    )
 
     # Resolve GAIE override files strictly relative to this script, if provided
     gaie_resolved_overrides: List[str] = []
@@ -201,7 +252,7 @@ def main(cfg: DictConfig) -> None:
         "-f",
         helmfile_path,
         "-l",
-        "name=gaie-inference-scheduling",
+        f"name={gaie_release}",
         "apply",
         "-n",
         namespace,
@@ -253,7 +304,7 @@ def main(cfg: DictConfig) -> None:
         "-f",
         helmfile_path,
         "-l",
-        "name=ms-inference-scheduling",
+        f"name={ms_release}",
         "apply",
         "-n",
         namespace,
@@ -281,6 +332,12 @@ def main(cfg: DictConfig) -> None:
         args_parts.append(f"--set-string decode.containers[0].env[0].value={_cuda_list}")
     ms_cmd.extend(["--args", " ".join(args_parts)])
     _run(ms_cmd, cwd=work_dir)
+
+    # Optional HTTPRoute manifest (shared for istio/kgateway providers)
+    httproute_path = os.path.join(work_dir, "httproute.yaml")
+    if os.path.isfile(httproute_path):
+        print("Applying HTTPRoute...")
+        _run(["kubectl", "-n", namespace, "apply", "-f", httproute_path])
 
     # Readiness check: ensure all vLLM pods respond locally, then gateway
     # Use the configured run.model when available; fall back to a sensible default
