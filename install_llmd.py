@@ -318,7 +318,7 @@ def main(cfg: DictConfig) -> None:
     # args_parts.append(f"--set decode.parallelism.tensor={decode_tp}")
     # Also append explicit vLLM arg via container args so it shows up in the command line without chart edits.
     # Use Kubernetes env expansion syntax $(TP_SIZE) so the value comes from the container env.
-    if decode_tp and decode_tp >= 1:
+    if decode_tp and decode_tp > 1:
         # Base values.yaml already defines two args; append after them to avoid overwrite.
         args_parts.append("--set-string decode.containers[0].args[2]=--tensor-parallel-size")
         args_parts.append("--set-string decode.containers[0].args[3]=$(TP_SIZE)")
