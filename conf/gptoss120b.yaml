@@ -1,0 +1,14 @@
+defaults:
+  - default
+  - _self_
+
+run:
+  model: "openai/gpt-oss-120b"
+  experiment_name: "gpt-oss-120b_${run.input_len}_osl${run.output_len}"
+
+install:
+  namespace: "llm-d-bench"
+  helmfile_overrides:
+    - override_ms_gptoss120b.yaml
+  decode_replicas: 8
+  decode_tp: 1

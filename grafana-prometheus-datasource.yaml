@@ -1,0 +1,22 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaDatasource
+metadata:
+  name: prometheus-datasource
+  namespace: openshift-operators
+spec:
+  instanceSelector:
+    matchLabels:
+      dashboards: "grafana-a"
+  datasource:
+    name: Prometheus (OpenShift Monitoring)
+    type: prometheus
+    access: proxy
+    url: https://thanos-querier-openshift-monitoring.apps.psap-aus-h200.ibm.rhperfscale.org
+    isDefault: true
+    editable: false
+    jsonData:
+      httpHeaderName1: "Authorization"
+      tlsSkipVerify: true
+      timeInterval: "30s"
+    secureJsonData:
+      httpHeaderValue1: "Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6Im1HZXdiRkI0N1pUVWwwN0p3bHpyaFJwcGdBZ25xU2NpblZreGwzSFpVc1UifQ.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjIl0sImV4cCI6MjA4NTU1MDA2NSwiaWF0IjoxNzcwMTkwMDY1LCJpc3MiOiJodHRwczovL2t1YmVybmV0ZXMuZGVmYXVsdC5zdmMiLCJqdGkiOiJlYmQyMzRhNi0wYjMyLTQ5ZGMtOTBiYi1iYzYwYzZlNWRiNTgiLCJrdWJlcm5ldGVzLmlvIjp7Im5hbWVzcGFjZSI6Im9wZW5zaGlmdC1vcGVyYXRvcnMiLCJzZXJ2aWNlYWNjb3VudCI6eyJuYW1lIjoiZ3JhZmFuYS1kYXRhc291cmNlIiwidWlkIjoiMjVlZGFhN2MtODk4OC00ODA3LWFkNWQtNzZiZTE5YzM0MTQ4In19LCJuYmYiOjE3NzAxOTAwNjUsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpvcGVuc2hpZnQtb3BlcmF0b3JzOmdyYWZhbmEtZGF0YXNvdXJjZSJ9.LxSyjB5bLA1ksfRJAAawrpfJiYAIb9A_DbvIhwsUbq0jzb09JRq0ST5DkVB7R3sR6CNxcdIosqzmYRXGlRrkF9VY2nV9nSjvs_uvoO7SuS1bhQouZe6E5H6jbxbbmCx-urbkwm-Zc6UVUKiqKha3xJDEU7kqSxpUVynfH3IIEMqIYg6OZnJybNgq_5DDgJDYVt80OSS9TqGAr7QHmH0M2CidcYPe2d1jb0QaOffLx6JpnXieEsYCAWxZcwg5UXpxbZPNjhNENpUhdzUllW4luKeHCFDApESVxxObmgKvFse1sQYkKeGvogsgfuGPp-DoX2LGoIyRa-SVxNC5XbCTkHpIx248KWIkOV-HCjjPKLfz-9tyjbVLKkSPri0yREodS-Ku0PQtiRrTRKvCq1EhwmyrGQihrABJrnNsuqQ02Y2F1yZoCjWeD1WGwX5aLn1Fjy892pt5N_nc4hu55ZVgCHSi4ywJkrC3iwioHXlmOEeG1QDjQIzl4ENN673B1fLADSgjQwmcbXula8vvUp-zcRt5vQMAZfjpa7GuSqE3PcbY0I1WjTyYl7DUY3IeHLXrGgoVNJwwMVF3y63G6sHLFXTKJoS7FEsyzeOMAsIo6-Tfuf0UYCVUvcf0xbsdv1gx-gomLO5riHwwXMIgAK1TO9aaPe9DsZs7PlE0zSXsBtQ"

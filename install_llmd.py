@@ -5,9 +5,11 @@ import ast
 import json
 import subprocess
 import sys
+import tempfile
 from typing import List
 
 import hydra
+import yaml
 from omegaconf import DictConfig, ListConfig
 
 DEFAULT_RELEASE_NAME_POSTFIX = "inference-scheduling"
@@ -156,6 +158,7 @@ def main(cfg: DictConfig) -> None:
     destroy_first = bool(cfg.install.destroy_first)
     decode_replicas = int(getattr(cfg.install, "decode_replicas", 8))
     decode_tp = int(getattr(cfg.install, "decode_tp", 1))
+    disable_prefix_cache = bool(getattr(cfg.install, "disable_prefix_cache", False))
 
     # Clone if missing
     _ensure_repo(repo_url, llmd_dir)
@@ -309,29 +312,121 @@ def main(cfg: DictConfig) -> None:
         "-n",
         namespace,
     ]
+    # Build a dynamic values override for vLLM args and env
+    temp_override_path = None
+    if decode_tp > 1 or disable_prefix_cache:
+        # Read base values to get the current args (avoid hardcoding)
+        base_values_path = os.path.join(work_dir, "ms-inference-scheduling/values.yaml")
+        base_container = None
+        try:
+            with open(base_values_path, 'r') as f:
+                base_values = yaml.safe_load(f)
+                base_containers = base_values.get("decode", {}).get("containers", [])
+                for c in base_containers:
+                    if c.get("name") == "vllm":
+                        base_container = c
+                        break
+        except Exception as e:
+            print(f"Warning: Could not read base values.yaml: {e}")
+            print("Using hardcoded defaults")
+            base_container = {
+                "name": "vllm",
+                "image": "ghcr.io/llm-d/llm-d-cuda:v0.3.1",
+                "modelCommand": "vllmServe",
+                "args": [
+                    "--kv-transfer-config",
+                    '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}',
+                    "--disable-uvicorn-access-log"
+                ]
+            }
+
+        # Start with base args
+        all_args = list(base_container.get("args", []))
+
+        # Append TP-specific args
+        if decode_tp and decode_tp > 1:
+            all_args.extend([
+                "--tensor-parallel-size",
+                "$(TP_SIZE)",
+                "--distributed-executor-backend",
+                "mp"
+            ])
+
+        # Append prefix cache flag
+        if disable_prefix_cache:
+            all_args.append("--no-enable-prefix-caching")
+
+        # Build override by copying entire base container and modifying only what we need
+        # This ensures we don't lose any fields that may be added to base values in the future
+        import copy
+        container = copy.deepcopy(base_container)
+
+        # Replace args with our modified version
+        container["args"] = all_args
+
+        # Override CUDA_VISIBLE_DEVICES if TP > 1
+        if decode_tp and decode_tp > 1:
+            cuda_devices = ",".join(str(i) for i in range(max(decode_tp, 1)))
+            # Find and update existing CUDA_VISIBLE_DEVICES env var, or add it
+            env_list = container.get("env", [])
+            cuda_env_found = False
+            for env_var in env_list:
+                if env_var.get("name") == "CUDA_VISIBLE_DEVICES":
+                    env_var["value"] = cuda_devices
+                    cuda_env_found = True
+                    break
+            if not cuda_env_found:
+                env_list.append({"name": "CUDA_VISIBLE_DEVICES", "value": cuda_devices})
+            container["env"] = env_list
+
+        # Ensure model-storage volumeMount is present if mountModelVolume is true
+        # The Helm chart template normally adds this when it sees mountModelVolume: true,
+        # but when we provide a complete container override with volumeMounts already specified,
+        # the template doesn't add it. So we must include it explicitly, and then remove
+        # the mountModelVolume flag to prevent the chart from adding it a second time.
+        if base_container.get("mountModelVolume", False):
+            volume_mounts = container.get("volumeMounts", [])
+            has_model_storage = any(vm.get("name") == "model-storage" for vm in volume_mounts)
+            if not has_model_storage:
+                volume_mounts.append({"name": "model-storage", "mountPath": "/model-cache"})
+                container["volumeMounts"] = volume_mounts
+            # Remove mountModelVolume since we've already added the mount manually
+            container.pop("mountModelVolume", None)
+
+        override_data = {"decode": {"containers": [container]}}
+
+        # Write temporary override file
+        fd, temp_override_path = tempfile.mkstemp(suffix=".yaml", prefix="llmd_override_")
+        try:
+            with os.fdopen(fd, 'w') as f:
+                yaml.dump(override_data, f)
+        except:
+            os.close(fd)
+            raise
+
+        print(f"Generated dynamic override: {temp_override_path}")
+        with open(temp_override_path, 'r') as f:
+            print(f.read())
+
     args_parts = []
+    # Add dynamic override first (if generated) so user overrides can take precedence
+    if temp_override_path:
+        args_parts.append(f"--values {temp_override_path}")
     if resolved_overrides:
         args_parts.append(" ".join([f"--values {p}" for p in resolved_overrides]))
     # Always set replicas via --set so no values file is required for that scalar
     args_parts.append(f"--set decode.replicas={decode_replicas}")
-    # Set tensor parallelism for decode via --set
-    # args_parts.append(f"--set decode.parallelism.tensor={decode_tp}")
-    # Also append explicit vLLM arg via container args so it shows up in the command line without chart edits.
-    # Use Kubernetes env expansion syntax $(TP_SIZE) so the value comes from the container env.
-    if decode_tp and decode_tp > 1:
-        # Base values.yaml already defines two args; append after them to avoid overwrite.
-        args_parts.append("--set-string decode.containers[0].args[2]=--tensor-parallel-size")
-        args_parts.append("--set-string decode.containers[0].args[3]=$(TP_SIZE)")
-        # Force multiprocessing executor to avoid Ray at TP>1
-        args_parts.append("--set-string decode.containers[0].args[4]=--distributed-executor-backend")
-        args_parts.append("--set-string decode.containers[0].args[5]=mp")
-        # Ensure at least two GPUs are visible when TP>1; override CUDA_VISIBLE_DEVICES from base values.
-        # Note: base values set env[0] to CUDA_VISIBLE_DEVICES; override just its value.
-        # Build device list "0..N-1" and escape commas so Helm does not split the value
-        _cuda_list = "\\,".join(str(i) for i in range(max(decode_tp, 1)))
-        args_parts.append(f"--set-string decode.containers[0].env[0].value={_cuda_list}")
     ms_cmd.extend(["--args", " ".join(args_parts)])
-    _run(ms_cmd, cwd=work_dir)
+    try:
+        _run(ms_cmd, cwd=work_dir)
+    finally:
+        # Clean up temporary override file if created
+        if temp_override_path and os.path.isfile(temp_override_path):
+            try:
+                os.unlink(temp_override_path)
+                print(f"Cleaned up temporary override: {temp_override_path}")
+            except OSError:
+                pass
 
     # Optional HTTPRoute manifest (shared for istio/kgateway providers)
     httproute_path = os.path.join(work_dir, "httproute.yaml")

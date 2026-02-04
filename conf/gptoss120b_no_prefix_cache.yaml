@@ -1,0 +1,16 @@
+defaults:
+  - default
+  - _self_
+
+run:
+  model: "openai/gpt-oss-120b"
+  experiment_name: "gpt-oss-120b_no_prefix_${run.input_len}_osl${run.output_len}"
+
+install:
+  namespace: "llm-d-bench"
+  helmfile_overrides:
+    - override_ms_gptoss120b.yaml
+  decode_replicas: 8
+  decode_tp: 1
+  # Disable vLLM prefix caching for testing scheduler behavior without prefix affinity
+  disable_prefix_cache: true

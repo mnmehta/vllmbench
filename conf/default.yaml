@@ -24,7 +24,7 @@ run:
 install:
   # Git and paths
   repo_url: "https://github.com/llm-d/llm-d"
-  llmd_dir: "/tmp/llmd"
+  llmd_dir: "/tmp/llm-d"
   well_lit_path: "guides/inference-scheduling/"
 
   # Helmfile overrides file (interpreted relative to install_llmd.py location)
@@ -38,6 +38,10 @@ install:
   gaie_helmfile_overrides: []
   # ModelService (ms) scalars
   decode_replicas: 8
+  # Tensor parallelism for decode pod (sets decode.parallelism.tensor in Helm)
+  decode_tp: 1
+  # Disable vLLM prefix caching (adds --no-enable-prefix-cache)
+  disable_prefix_cache: false
 
 # Group: multiturn (multi-turn benchmark settings)
 multiturn:
