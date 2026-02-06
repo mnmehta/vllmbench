@@ -160,6 +160,18 @@ def main(cfg: DictConfig) -> None:
     decode_tp = int(getattr(cfg.install, "decode_tp", 1))
     disable_prefix_cache = bool(getattr(cfg.install, "disable_prefix_cache", False))
 
+    # Parse extra_vllm_options - handle both list and string formats
+    extra_vllm_options_raw = getattr(cfg.install, "extra_vllm_options", [])
+    extra_vllm_options = []
+    if extra_vllm_options_raw:
+        if isinstance(extra_vllm_options_raw, (list, tuple, ListConfig)):
+            extra_vllm_options = [str(x) for x in extra_vllm_options_raw if str(x).strip()]
+        else:
+            # Handle space-separated string
+            s = str(extra_vllm_options_raw).strip()
+            if s:
+                extra_vllm_options = s.split()
+
     # Clone if missing
     _ensure_repo(repo_url, llmd_dir)
 
@@ -314,7 +326,7 @@ def main(cfg: DictConfig) -> None:
     ]
     # Build a dynamic values override for vLLM args and env
     temp_override_path = None
-    if decode_tp > 1 or disable_prefix_cache:
+    if decode_tp > 1 or disable_prefix_cache or extra_vllm_options:
         # Read base values to get the current args (avoid hardcoding)
         base_values_path = os.path.join(work_dir, "ms-inference-scheduling/values.yaml")
         base_container = None
@@ -355,6 +367,10 @@ def main(cfg: DictConfig) -> None:
         # Append prefix cache flag
         if disable_prefix_cache:
             all_args.append("--no-enable-prefix-caching")
+
+        # Append extra vLLM options
+        if extra_vllm_options:
+            all_args.extend(extra_vllm_options)
 
         # Build override by copying entire base container and modifying only what we need
         # This ensures we don't lose any fields that may be added to base values in the future

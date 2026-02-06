@@ -1,0 +1,15 @@
+defaults:
+  - gptoss120b
+  - _self_
+
+# Example showing extra_vllm_options usage with list format
+install:
+  extra_vllm_options:
+    - "--max-model-len"
+    - "32000"
+    - "--max-num-seqs"
+    - "256"
+
+# Alternative: space-separated string format
+# install:
+#   extra_vllm_options: "--max-model-len 32000 --max-num-seqs 256"

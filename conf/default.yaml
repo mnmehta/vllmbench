@@ -42,6 +42,9 @@ install:
   decode_tp: 1
   # Disable vLLM prefix caching (adds --no-enable-prefix-cache)
   disable_prefix_cache: false
+  # Extra vLLM command-line options (list or space-separated string)
+  # Example: ["--max-model-len", "32000"] or "--max-model-len 32000"
+  extra_vllm_options: []
 
 # Group: multiturn (multi-turn benchmark settings)
 multiturn:
