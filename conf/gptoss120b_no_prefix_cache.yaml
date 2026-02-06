@@ -15,4 +15,10 @@ install:
   # Disable vLLM prefix caching for testing scheduler behavior without prefix affinity
   disable_prefix_cache: true
   # Extra options for server mlperf
-  extra_vllm_options: "--max-num-batched-tokens 2048 --max-num-seqs 448 --max-cudagraph-capture-size 2048"
+  extra_vllm_options:
+    - "--max-num-batched-tokens"
+    - "2048"
+    - "--max-num-seqs"
+    - "448"
+    - "--compilation-config"
+    - '{"max_cudagraph_capture_size": 2048}'
