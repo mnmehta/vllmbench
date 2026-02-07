@@ -1,0 +1,12 @@
+defaults:
+  - default
+  - _self_
+
+run:
+  model: "openai/gpt-oss-20b"
+  experiment_name: "gpt-oss-20b"
+
+install:
+  helmfile_overrides:
+    - override_ms_gptoss20b.yaml
+    - override_ms_monitor.yaml

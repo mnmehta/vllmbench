@@ -7,5 +7,7 @@ run:
   experiment_name: "llm-d-version_oct1_70b_${run.input_len}_osl${run.output_len}"
 
 install:
+  #well_lit_path: "guides/pd-disaggregation"
   helmfile_overrides:
+    #- override_ms_env.yaml
     - override_ms_70b.yaml
